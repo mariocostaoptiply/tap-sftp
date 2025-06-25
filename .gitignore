@@ -36,6 +36,7 @@ docs/_templates/
 *.env
 
 # virtualenv
+.venv/
 venv/
 ENV/
 

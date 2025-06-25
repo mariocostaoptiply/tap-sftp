@@ -10,6 +10,7 @@ import backoff
 import paramiko
 import pytz
 import singer
+from typing import Optional
 from paramiko.ssh_exception import AuthenticationException, SSHException
 
 from tap_sftp import decrypt
@@ -35,12 +36,27 @@ class SFTPConnection():
         self.transport = None
         self.retries = 10
         self.__sftp = None
-        if private_key_file:
-            key_path = os.path.expanduser(private_key_file)
-            self.key = paramiko.RSAKey.from_private_key_file(key_path)
-        elif private_key:
-            key_string = StringIO(private_key)
-            self.key = paramiko.RSAKey.from_private_key(key_string)
+        self._setup_key(private_key_file, private_key, password)
+
+    def _setup_key(self, private_key_file: Optional[str] = None, private_key: Optional[str] = None, passphrase: Optional[str] = None):
+        key_classes = [paramiko.RSAKey, paramiko.DSSKey, paramiko.ECDSAKey, paramiko.Ed25519Key]
+    
+        for key_class in key_classes:
+            try:
+                if private_key_file:
+                    key_path = os.path.expanduser(private_key_file)
+                    self.key = key_class.from_private_key_file(key_path, passphrase)
+                elif private_key:
+                    key_string = StringIO(private_key)
+                    self.key = key_class.from_private_key(key_string, passphrase)
+                break  # Successfully loaded, no need to try other types
+            except paramiko.SSHException:
+                continue # Try the next key type
+        
+        if not self.key and (private_key_file or private_key):
+            error_message = "Could not determine the SSH key type or load the key."
+            LOGGER.error(error_message)
+            raise Exception(error_message)
 
     # If connection is snapped during connect flow, retry up to a
     # minute for SSH connection to succeed. 2^6 + 2^5 + ...
