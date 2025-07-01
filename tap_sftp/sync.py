@@ -6,6 +6,7 @@ from tap_sftp.aws_ssm import AWS_SSM
 from tap_sftp.singer_encodings import csv_handler
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime
 import backoff
 
 LOGGER = singer.get_logger()
@@ -13,9 +14,13 @@ LOGGER = singer.get_logger()
 
 def sync_ftp(sftp_file, stream, table_spec, config, state, table_name):
     records_streamed = sync_file(sftp_file, stream, table_spec, config)
-    state = singer.write_bookmark(state, table_name, 'modified_since', sftp_file['last_modified'].isoformat())
-    singer.write_state(state)
-    return records_streamed
+    # Return the state update instead of writing it directly
+    state_update = {
+        'table_name': table_name,
+        'bookmark_key': 'modified_since',
+        'bookmark_value': sftp_file['last_modified'].isoformat()
+    }
+    return records_streamed, state_update
 
 
 def sync_stream(config, state, stream):
@@ -53,10 +58,25 @@ def sync_stream(config, state, stream):
     if not files:
         return records_streamed
 
+    # Collect state updates from all threads
+    state_updates = []
+    
     with ThreadPoolExecutor(max_workers=8) as executor:
         future_sftp = {executor.submit(sync_ftp, sftp_file, stream, table_spec, config, state, table_visible_name): sftp_file for sftp_file in files}
         for future in as_completed(future_sftp):
-            records_streamed += future.result()
+            result = future.result()
+            records_streamed += result[0]
+            state_updates.append(result[1])
+
+    # Sort state updates by datetime to ensure latest file's state is written last
+    state_updates.sort(key=lambda x: datetime.fromisoformat(x['bookmark_value']))
+    
+    # Apply all state updates at once
+    for state_update in state_updates:
+        state = singer.write_bookmark(state, state_update['table_name'], state_update['bookmark_key'], state_update['bookmark_value'])
+    
+    # Write state once after all updates are collected
+    singer.write_state(state)
 
     LOGGER.info('Wrote %s records for table "%s".', records_streamed, table_visible_name)
 
