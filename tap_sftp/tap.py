@@ -1,3 +1,4 @@
+import csv
 import json
 import sys
 
@@ -48,8 +49,14 @@ def do_sync(config, catalog, state):
         singer.write_schema(stream_name, stream.schema.to_dict(), key_properties)
 
         LOGGER.info("%s: Starting sync", stream_name)
-        counter_value = sync_stream(config, state, stream)
-        LOGGER.info("%s: Completed sync (%s rows)", stream_name, counter_value)
+        try:
+            counter_value = sync_stream(config, state, stream)
+            LOGGER.info("%s: Completed sync (%s rows)", stream_name, counter_value)
+        except csv.Error as e:
+            if "field larger than field limit" in str(e):
+                raise Exception(f"CSV file ({stream_name}) seems to be corrupted. Please check the file for unclosed quotes. Error:{e}")
+            else:
+                raise e
 
     headers = [['table_name',
                 'search prefix',

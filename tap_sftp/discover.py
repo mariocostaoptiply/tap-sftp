@@ -1,3 +1,4 @@
+import csv
 import singer
 from singer import metadata
 
@@ -19,7 +20,13 @@ def discover_streams(config):
         if visible_name != original_name:
             LOGGER.info(f"Table name has been renamed from {original_name} to {visible_name} due to unsupported characters.")
         LOGGER.info('Sampling records to determine table JSON schema "%s".', table_spec['table_name'])
-        schema = json_schema.get_schema_for_table(conn, table_spec, config)
+        try:
+            schema = json_schema.get_schema_for_table(conn, table_spec, config)
+        except csv.Error as e:
+            if "field larger than field limit" in str(e):
+                raise Exception(f"CSV file ({original_name}) seems to be corrupted. Please check the file for unclosed quotes. Error: {e}")
+            else:
+                raise e
         stream_md = metadata.get_standard_metadata(schema,
                                                    key_properties=table_spec.get('key_properties'),
                                                    replication_method='INCREMENTAL')
