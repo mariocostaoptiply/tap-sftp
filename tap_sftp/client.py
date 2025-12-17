@@ -159,6 +159,9 @@ class SFTPConnection():
         files = self.get_files_by_prefix(prefix, search_subdirectories)
         if files:
             LOGGER.info('Found %s files in "%s"', len(files), prefix)
+            # Log sample filenames for debugging
+            sample_filenames = [os.path.basename(f['filepath']) for f in files[:5]]
+            LOGGER.debug(f"Sample filenames: {sample_filenames}")
         else:
             LOGGER.warning('Found no files on specified SFTP server at "%s"', prefix)
 
@@ -204,10 +207,31 @@ class SFTPConnection():
 
     def get_files_matching_pattern(self, files, pattern):
         """ Takes a file dict {"filepath": "...", "last_modified": "..."} and a regex pattern string, and returns
-            files matching that pattern. """
+            files matching that pattern. Matches against filename only (basename), not full path. """
         matcher = re.compile(pattern)
         LOGGER.info(f"Searching for files for matching pattern: {pattern}")
-        return [f for f in files if matcher.search(f["filepath"])]
+        
+        # Debug: Log sample filenames to help troubleshoot
+        if files:
+            sample_filenames = [os.path.basename(f["filepath"]) for f in files[:5]]
+            LOGGER.debug(f"Sample filenames found: {sample_filenames}")
+        
+        # Match against filename only (basename), not full path
+        # This is more intuitive and matches user expectations
+        matching = []
+        for f in files:
+            filename = os.path.basename(f["filepath"])
+            if matcher.search(filename):
+                matching.append(f)
+                LOGGER.debug(f"Match found: {filename} (full path: {f['filepath']})")
+        
+        if not matching and files:
+            LOGGER.warning(
+                f"No files matched pattern '{pattern}'. "
+                f"Pattern is matched against filename only (not full path)."
+            )
+        
+        return matching
 
 
 def connection(config):
